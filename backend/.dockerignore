@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.pytest_cache
+.venv
+venv
+.env
+*.egg-info
+mlruns
+reports
+notebooks
+scratch
+scripts_generate_*
+test_*.py

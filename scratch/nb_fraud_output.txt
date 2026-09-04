@@ -1,0 +1,176 @@
+--- CELL 0 (code) ---
+import sys
+from pathlib import Path
+project_root = Path.cwd().parent
+sys.path.append(str(project_root))
+
+%load_ext autoreload
+%autoreload 2
+
+--- CELL 1 (code) ---
+from src.fraud.data import load_fraud_data, prepare_fraud_features, train_test_split_fraud
+
+df_fraud = load_fraud_data()
+df_fraud = prepare_fraud_features(df_fraud)
+
+train_fraud, test_fraud = train_test_split_fraud(df_fraud)
+
+print("Train :", len(train_fraud), "| Fraude :", train_fraud["fraud_label"].mean())
+print("Test  :", len(test_fraud), "| Fraude :", test_fraud["fraud_label"].mean())
+
+--- CELL 2 (code) ---
+from src.fraud.data import load_fraud_data, prepare_fraud_features, train_test_split_fraud
+
+df_fraud = load_fraud_data()
+df_fraud = prepare_fraud_features(df_fraud)
+
+train_fraud, test_fraud = train_test_split_fraud(df_fraud)
+
+print("Train :", len(train_fraud), "| Taux fraude :", train_fraud["fraud_label"].mean())
+print("Test  :", len(test_fraud), "| Taux fraude :", test_fraud["fraud_label"].mean())
+
+--- CELL 3 (code) ---
+from src.fraud.models import fit_isolation_forest, evaluate_isolation_forest
+
+iso_model = fit_isolation_forest(train_fraud)
+results_iso = evaluate_isolation_forest(iso_model, test_fraud)
+
+print("AUC-ROC :", results_iso["auc_roc"])
+print("PR-AUC  :", results_iso["pr_auc"])
+print(f"\nPour référence, un modèle aléatoire aurait AUC-ROC ≈ 0.5 et PR-AUC ≈ {test_fraud['fraud_label'].mean():.4f} (prévalence)")
+
+--- CELL 4 (code) ---
+import pandas as pd
+from src.fraud.models import fit_supervised_baseline, evaluate_supervised
+from src.fraud.data import CATEGORICAL_COLS, NUMERIC_COLS
+
+rf_model = fit_supervised_baseline(train_fraud)
+results_rf = evaluate_supervised(rf_model, test_fraud)
+
+print("=== Isolation Forest (non supervisé) ===")
+print("AUC-ROC :", results_iso["auc_roc"], "| PR-AUC :", results_iso["pr_auc"])
+print()
+print("=== Random Forest (supervisé) ===")
+print("AUC-ROC :", results_rf["auc_roc"], "| PR-AUC :", results_rf["pr_auc"])
+
+# Importance des variables -- pour vérifier que AddressChange_Claim/Fault ressortent bien
+importances = pd.Series(rf_model.feature_importances_, index=[c for c in train_fraud.columns if c.endswith(('_code','_norm'))])
+print("\nTop 10 variables les plus importantes :")
+print(importances.sort_values(ascending=False).head(10))
+
+# Sauvegarder le modèle et les métadonnées pour l'API
+import joblib
+
+# Encodeurs : mêmes catégories, même ordre que ceux vus par astype("category") à l'entraînement
+encoders = {
+    col: df_fraud[col].astype("category").cat.categories.tolist()
+    for col in CATEGORICAL_COLS
+}
+joblib.dump(encoders, "../models/fraud_encoders.pkl")
+
+# Statistiques de normalisation (moyenne, écart-type) par variable numérique
+normalization_stats = {
+    col: (df_fraud[col].mean(), df_fraud[col].std())
+    for col in NUMERIC_COLS
+}
+joblib.dump(normalization_stats, "../models/fraud_normalization_stats.pkl")
+
+# Valeurs par défaut = mode pour les catégorielles, médiane pour les numériques
+# (calculées sur train_fraud, jamais sur test)
+default_values = {}
+for col in CATEGORICAL_COLS:
+    default_values[col] = train_fraud[col].mode()[0]
+for col in NUMERIC_COLS:
+    default_values[col] = train_fraud[col].median()
+joblib.dump(default_values, "../models/fraud_default_values.pkl")
+
+joblib.dump(rf_model, "../models/fraud_random_forest.pkl")
+
+print("\n4 fichiers sauvegardés dans ../models/")
+print("  - fraud_random_forest.pkl")
+print("  - fraud_encoders.pkl")
+print("  - fraud_normalization_stats.pkl")
+print("  - fraud_default_values.pkl")
+
+--- CELL 5 (code) ---
+import sys
+!{sys.executable} -m pip install torch_geometric
+
+from src.fraud.graph import build_pyg_graph
+
+feature_cols = [c for c in df_fraud.columns if c.endswith(("_code", "_norm")) and c not in ["RepNumber_code"]]
+
+graph_data = build_pyg_graph(df_fraud, feature_cols, min_shared_attrs=2)
+
+print("Nombre de nœuds :", graph_data.num_nodes)
+print("Nombre d'arêtes (orientées, donc x2) :", graph_data.num_edges)
+print("Degré moyen :", graph_data.num_edges / graph_data.num_nodes)
+print()
+
+# Vérification cruciale : les nœuds connectés partagent-ils plus souvent le label de fraude
+# que des paires aléatoires ? (test d'homophilie -- condition nécessaire pour qu'un GNN apporte quelque chose)
+edge_index = graph_data.edge_index.numpy()
+y = graph_data.y.numpy()
+
+if graph_data.num_edges > 0:
+    same_label = (y[edge_index[0]] == y[edge_index[1]]).mean()
+    print(f"Proportion de paires connectées avec le même label : {same_label:.4f}")
+    print(f"Référence (accord attendu au hasard) : {(y.mean()**2 + (1-y.mean())**2):.4f}")
+
+--- CELL 6 (code) ---
+print("Distribution du nombre de dossiers par RepNumber :")
+print(df_fraud.groupby("RepNumber").size().describe())
+
+--- CELL 7 (code) ---
+
+from src.fraud.graph import build_edge_index
+similarity_cols = ["Fault", "AddressChange_Claim", "Days_Policy_Claim", "PolicyType", "BasePolicy"]
+
+edge_index = build_edge_index(df_fraud, similarity_cols, min_shared_attrs=len(similarity_cols))
+
+print("Nombre d'arêtes (orientées) :", edge_index.shape[1])
+print("Degré moyen :", edge_index.shape[1] / len(df_fraud))
+
+y = df_fraud["fraud_label"].values
+if edge_index.shape[1] > 0:
+    same_label = (y[edge_index[0].numpy()] == y[edge_index[1].numpy()]).mean()
+    print(f"Proportion de paires connectées avec le même label : {same_label:.4f}")
+    print(f"Référence hasard : {(y.mean()**2 + (1-y.mean())**2):.4f}")
+
+--- CELL 8 (code) ---
+
+from src.fraud.graph import build_edge_index_rare_shared
+
+
+cols_to_test = ["Fault", "AddressChange_Claim", "Days_Policy_Claim", "Days_Policy_Accident", "PastNumberOfClaims"]
+
+edge_index = build_edge_index_rare_shared(df_fraud, cols_to_test, rarity_threshold=0.10)
+
+print("Nombre d'arêtes (orientées) :", edge_index.shape[1])
+print("Degré moyen :", edge_index.shape[1] / len(df_fraud))
+
+y = df_fraud["fraud_label"].values
+if edge_index.shape[1] > 0:
+    same_label = (y[edge_index[0].numpy()] == y[edge_index[1].numpy()]).mean()
+    print(f"Proportion de paires connectées avec le même label : {same_label:.4f}")
+    print(f"Référence hasard : {(y.mean()**2 + (1-y.mean())**2):.4f}")
+
+    # Détail : quelles valeurs rares génèrent le plus d'arêtes et avec quelle homophilie
+    for col in cols_to_test:
+        freq = df_fraud[col].value_counts(normalize=True)
+        rare_values = freq[freq < 0.10].index
+        print(f"\n{col} — valeurs rares (< 10%) : {list(rare_values)}")
+
+--- CELL 9 (code) ---
+import joblib
+from pathlib import Path
+
+Path("../models").mkdir(exist_ok=True)
+
+joblib.dump(rf_model, "../models/fraud_random_forest.pkl")
+
+print("Model saved successfully!")
+
+--- CELL 10 (code) ---
+
+

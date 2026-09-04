@@ -2,19 +2,20 @@
 Router pour l'API d'explicabilité (SHAP).
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.auth import get_current_user
 from app.schemas.explainability import (
-    PricingExplanationRequest, 
-    FraudExplanationRequest, 
+    PricingExplanationRequest,
+    FraudExplanationRequest,
     ShapExplanation
 )
-from app.services.explainability_service import explain_pricing, explain_fraud
+from app.services.explainability_service import explain_pricing, explain_fraud, explain_cann_interactions
 
 router = APIRouter(prefix="/explain", tags=["explainability"])
 
 
 @router.post("/pricing", response_model=ShapExplanation)
-async def explain_pricing_prediction(request: PricingExplanationRequest):
+async def explain_pricing_prediction(request: PricingExplanationRequest, _user: dict = Depends(get_current_user)):
     """
     Retourne les valeurs SHAP pour une prédiction de tarification.
     
@@ -44,7 +45,7 @@ async def explain_pricing_prediction(request: PricingExplanationRequest):
 
 
 @router.post("/fraud", response_model=ShapExplanation)
-async def explain_fraud_prediction(request: FraudExplanationRequest):
+async def explain_fraud_prediction(request: FraudExplanationRequest, _user: dict = Depends(get_current_user)):
     """
     Retourne les valeurs SHAP pour une prédiction de fraude.
     
@@ -69,3 +70,33 @@ async def explain_fraud_prediction(request: FraudExplanationRequest):
         return ShapExplanation(**shap_result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cann-interactions")
+async def explain_cann_interactions_endpoint(request: PricingExplanationRequest, _user: dict = Depends(get_current_user)):
+    """
+    Retourne les SHAP interaction values pour le modèle CANN.
+    
+    Démontre comment le CANN capture les interactions complexes que le GLM rate,
+    comme VehPower × VehAge, VehPower × VehGas, etc.
+    """
+    try:
+        # Convertir la requête en PricingRequest pour le service
+        from app.schemas.pricing import PricingRequest
+        pricing_request = PricingRequest(
+            veh_power=request.veh_power,
+            veh_age=request.veh_age,
+            driv_age=request.driv_age,
+            bonus_malus=request.bonus_malus,
+            veh_brand=request.veh_brand,
+            veh_gas=request.veh_gas,
+            region=request.region,
+            area=request.area,
+            density=request.density,
+            exposure=request.exposure
+        )
+        
+        interaction_result = explain_cann_interactions(pricing_request)
+        return interaction_result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CANN interaction explanation failed: {str(e)}")

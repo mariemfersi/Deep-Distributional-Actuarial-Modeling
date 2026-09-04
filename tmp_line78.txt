@@ -1,0 +1,1 @@
+    """GraphSAGE 2 couches (SAGEConv in\u2192h\u2192h) + t\xeate lin\xe9aire 1 logit."""

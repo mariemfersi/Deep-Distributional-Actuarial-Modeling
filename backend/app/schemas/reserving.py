@@ -20,6 +20,14 @@ class ReservingIbnrRequest(BaseModel):
 
 
 
+class TriangleData(BaseModel):
+    values: list[list[float]]
+    std_errors: list[list[float]]
+    origin_years: list[int]
+    development_years: list[int]
+    cell_status: list[list[int]]  # 0 = observed, 1 = projected
+
+
 class ReservingIbnrResponse(BaseModel):
 
     """Résultat de prédiction IBNR avec intervalles de confiance (Mack + Conformal)."""
@@ -28,9 +36,15 @@ class ReservingIbnrResponse(BaseModel):
 
     ibnr_estimate: float
 
-    mack_interval: dict = Field(description="Intervalle Mack (asymptotique, couverture 74.4%)")
+    mack_interval: dict = Field(description="Intervalle Mack (asymptotique). Couverture empirique mesurée via backtest sur le portefeuille.")
 
-    conformal_interval: dict = Field(description="Intervalle Conforme (calibré, couverture 91.9%)")
+    conformal_interval: dict = Field(description="Intervalle Conforme (split-conformal, Vovk et al.). q_hat et couverture empirique mesurés et chargés depuis l'artefact de calibration.")
+
+    triangle_data: TriangleData | None = Field(default=None, description="Triangle values and standard errors for heatmap visualization")
+
+    ldfs: list[float] = Field(default=[], description="Facteurs de développement (LDF) selon formule du cours: f_j = Σ C_{i,j+1} / Σ C_{i,j}")
+
+    cadences: list[float] = Field(default=[], description="Cadences cumulées selon formule du cours: pc_k = 1/(f_k × ... × f_n)")
 
     model_version: str = "mack_conformal_v1"
 
@@ -58,7 +72,9 @@ class ReservingResponse(BaseModel):
 
     predicted_ibnr: float
 
-    model_version: str = "deep_triangle_soft_clip_v1"
+    model_used: str = "deep_triangle_gru"
+
+    note: str = ""
 
 
 

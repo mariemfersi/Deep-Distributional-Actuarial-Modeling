@@ -1,0 +1,25 @@
+{
+  "dataset": "freMTPL2 (freq+sev)",
+  "split": "train/valid/test = 60/20/20 (seed 123)",
+  "test_size": 135604,
+  "glm_gini_test": 0.2781,
+  "cann_available": true,
+  "cann_gini_test": 0.2899,
+  "cann_gini_relative_gain": 0.0424,
+  "glm_poisson_deviance_test": 0.60083,
+  "ngboost": {
+    "n_observations": 5051,
+    "mean_severity": 1781.66,
+    "median_severity": 1172.0,
+    "mean_lower_90": 99.19,
+    "mean_upper_90": 5320.87,
+    "std_severity": 253.06
+  },
+  "copula": {
+    "spearman_rho": 0.2675,
+    "spearman_p": 0.0,
+    "gaussian_rho": 0.2793,
+    "n_observations": 5063,
+    "note": "D\u00e9pendance estim\u00e9e sur polices sinistr\u00e9es (Rank)."
+  }
+}

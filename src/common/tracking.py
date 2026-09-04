@@ -3,17 +3,27 @@ Suivi d'expériences MLflow — utilitaire centralisé pour consigner les runs
 des trois modules (pricing, reserving, fraud) de façon homogène.
 """
 
+import os
 import mlflow
 from pathlib import Path
 
-from src.common.config import get_project_root
 
+def init_mlflow(experiment_name: str, tracking_uri: str | None = None):
+    """Initialise le tracking MLflow.
 
-def init_mlflow(experiment_name: str):
-    """Initialise le tracking MLflow en local (dossier mlruns/ à la racine du projet)."""
-    root = get_project_root()
-    tracking_dir = root / "mlruns"
-    mlflow.set_tracking_uri(f"file://{tracking_dir}")
+    Args:
+        experiment_name: Nom de l'expérience MLflow.
+        tracking_uri: URI du serveur MLflow. Si None, lit la variable
+                      d'environnement MLFLOW_TRACKING_URI, sinon défaut local.
+    """
+    if tracking_uri is None:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if tracking_uri is None:
+        # Fallback : tracking local dans mlruns/
+        root = Path(__file__).resolve().parents[2]
+        tracking_uri = f"file://{root / 'mlruns'}"
+
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
 

@@ -1,0 +1,132 @@
+{
+  "dataset": "fraud_oracle.csv",
+  "split": "train/test = 0/20 (seed 123), split sur donn\u00e9es brutes AVANT pr\u00e9processing (anti-fuite)",
+  "test_size": 3084,
+  "best_model": "XGB + SMOTE",
+  "leakage_handling": "preprocessor_fit_on_train_only",
+  "benchmark": [
+    {
+      "model": "XGB + SMOTE",
+      "auc_roc": 0.8531,
+      "pr_auc": 0.2562,
+      "precision": 0.4762,
+      "recall": 0.0578,
+      "f1": 0.1031,
+      "best": true
+    },
+    {
+      "model": "XGBoost",
+      "auc_roc": 0.8389,
+      "pr_auc": 0.2302,
+      "precision": 0.2104,
+      "recall": 0.3988,
+      "f1": 0.2754,
+      "best": false
+    },
+    {
+      "model": "Random Forest",
+      "auc_roc": 0.823,
+      "pr_auc": 0.2048,
+      "precision": 0.1223,
+      "recall": 0.9306,
+      "f1": 0.2163,
+      "best": false
+    },
+    {
+      "model": "SVM (RBF)",
+      "auc_roc": 0.8063,
+      "pr_auc": 0.1694,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "best": false
+    },
+    {
+      "model": "RF + SMOTE",
+      "auc_roc": 0.7985,
+      "pr_auc": 0.1561,
+      "precision": 0.1505,
+      "recall": 0.422,
+      "f1": 0.2219,
+      "best": false
+    },
+    {
+      "model": "LOF",
+      "auc_roc": 0.562,
+      "pr_auc": 0.0697,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "best": false
+    },
+    {
+      "model": "Isolation Forest",
+      "auc_roc": 0.5268,
+      "pr_auc": 0.0642,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "best": false
+    }
+  ],
+  "cross_validation": {
+    "Random Forest": {
+      "mean_auc_roc": 0.8151,
+      "std_auc_roc": 0.0159
+    },
+    "RF + SMOTE": {
+      "mean_auc_roc": 0.7961,
+      "std_auc_roc": 0.0187
+    },
+    "XGBoost": {
+      "mean_auc_roc": 0.8313,
+      "std_auc_roc": 0.0158
+    },
+    "XGB + SMOTE": {
+      "mean_auc_roc": 0.8429,
+      "std_auc_roc": 0.0138
+    },
+    "SVM (RBF)": {
+      "mean_auc_roc": 0.7897,
+      "std_auc_roc": 0.0239
+    }
+  },
+  "boruta": {
+    "n_features": 30,
+    "confirmed": [
+      "Fault_code",
+      "PolicyType_code",
+      "VehicleCategory_code",
+      "VehiclePrice_code",
+      "AddressChange_Claim_code",
+      "BasePolicy_code",
+      "Age_norm",
+      "Deductible_norm"
+    ],
+    "tentative": [],
+    "rejected": [
+      "Month_code",
+      "DayOfWeek_code",
+      "Make_code",
+      "AccidentArea_code",
+      "DayOfWeekClaimed_code",
+      "MonthClaimed_code",
+      "Sex_code",
+      "MaritalStatus_code",
+      "Days_Policy_Accident_code",
+      "Days_Policy_Claim_code",
+      "PastNumberOfClaims_code",
+      "AgeOfVehicle_code",
+      "AgeOfPolicyHolder_code",
+      "PoliceReportFiled_code",
+      "WitnessPresent_code",
+      "AgentType_code",
+      "NumberOfSuppliments_code",
+      "NumberOfCars_code",
+      "WeekOfMonth_norm",
+      "RepNumber_norm",
+      "DriverRating_norm",
+      "Year_norm"
+    ]
+  }
+}

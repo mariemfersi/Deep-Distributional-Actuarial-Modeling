@@ -1,25 +1,21 @@
 """
 Module Fraude — Construction du graphe de dossiers.
 
-Le graphe combine une ancre réelle du dataset (RepNumber, l'agent traitant
-le dossier) et une condition de similarité de profil (Make, VehicleCategory,
-PolicyType), documentée comme limite méthodologique au chapitre 3 : ce
-dataset ne fournit pas de structure relationnelle complète et vérifiée,
-mais RepNumber constitue une vraie variable d'ancrage plutôt qu'une
-simulation entièrement artificielle.
+Fournit 4 stratégies de construction de graphes par similarité ou ancrage,
+chacune évaluée par un test d'homophilie dans le chapitre 6.
 """
 
 import numpy as np
 import pandas as pd
 import torch
+from collections import defaultdict
 from torch_geometric.data import Data
 
 
-def build_edge_index(df: pd.DataFrame, min_shared_attrs: int = 2) -> torch.Tensor:
+def build_edge_index_repnumber(df: pd.DataFrame, min_shared_attrs: int = 2) -> torch.Tensor:
     """
-    Construit les arêtes du graphe : deux dossiers sont connectés s'ils
-    partagent le même RepNumber ET au moins `min_shared_attrs` autres
-    attributs de profil (Make, VehicleCategory, PolicyType).
+    Tentative 1 : Deux dossiers sont connectés s'ils partagent le même RepNumber
+    ET au moins `min_shared_attrs` autres attributs (Make, VehicleCategory, PolicyType).
     """
     edges = []
     similarity_cols = ["Make", "VehicleCategory", "PolicyType"]
@@ -28,57 +24,35 @@ def build_edge_index(df: pd.DataFrame, min_shared_attrs: int = 2) -> torch.Tenso
         if len(group) < 2:
             continue
         indices = group.index.tolist()
-        for i in range(len(indices)):
-            for j in range(i + 1, len(indices)):
-                idx_i, idx_j = indices[i], indices[j]
-                shared = sum(
-                    df.loc[idx_i, col] == df.loc[idx_j, col] for col in similarity_cols
-                )
+        vals = group[similarity_cols].values
+        n = len(indices)
+        for i in range(n):
+            for j in range(i + 1, n):
+                shared = (vals[i] == vals[j]).sum()
                 if shared >= min_shared_attrs:
-                    edges.append((idx_i, idx_j))
-                    edges.append((idx_j, idx_i))  # graphe non orienté
+                    edges.append((indices[i], indices[j]))
+                    edges.append((indices[j], indices[i]))
 
     if len(edges) == 0:
         return torch.empty((2, 0), dtype=torch.long)
 
-    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
-    return edge_index
+    return torch.tensor(edges, dtype=torch.long).t().contiguous()
 
 
-def build_pyg_graph(df: pd.DataFrame, feature_cols: list, min_shared_attrs: int = 2) -> Data:
-    """Construit l'objet Data PyTorch Geometric complet (features + arêtes + labels)."""
-    df = df.reset_index(drop=True)
-
-    x = torch.tensor(df[feature_cols].values, dtype=torch.float32)
-    y = torch.tensor(df["fraud_label"].values, dtype=torch.long)
-
-    edge_index = build_edge_index(df, min_shared_attrs=min_shared_attrs)
-
-    data = Data(x=x, edge_index=edge_index, y=y)
-    return data
-
-
-
-def build_edge_index(df: pd.DataFrame, similarity_cols: list, min_shared_attrs: int) -> torch.Tensor:
+def build_edge_index_similarity(df: pd.DataFrame, similarity_cols: list, min_shared_attrs: int = None) -> torch.Tensor:
     """
-    Construit les arêtes du graphe par similarité de profil stricte.
-    Faute d'identifiant relationnel fiable dans ce dataset (RepNumber
-    s'avère être un code régional à faible cardinalité, pas un agent
-    individuel), le graphe est construit entièrement par similarité,
-    limite méthodologique documentée explicitement au chapitre 3.
+    Tentatives 2 et 3 : Connexion par correspondance exacte sur une liste d'attributs.
+    - Tentative 2 : 6 attributs génériques (Make, VehicleCategory, PolicyType, AccidentArea, AgeOfVehicle, BasePolicy)
+    - Tentative 3 : 5 attributs ciblés discriminants (Fault, AddressChange_Claim, Days_Policy_Claim, PolicyType, BasePolicy)
     """
-    from collections import defaultdict
-
     edges = []
-    # Regrouper par tuple de valeurs sur les colonnes de similarité -- bien plus efficace
-    # que la double boucle précédente, et équivalent à "min_shared_attrs = tous les attributs"
     groups = defaultdict(list)
     for idx, row in df[similarity_cols].iterrows():
         key = tuple(row.values)
         groups[key].append(idx)
 
     for key, indices in groups.items():
-        if len(indices) < 2 or len(indices) > 50:  # on ignore aussi les groupes trop massifs
+        if len(indices) < 2 or len(indices) > 50:
             continue
         for i in range(len(indices)):
             for j in range(i + 1, len(indices)):
@@ -93,14 +67,9 @@ def build_edge_index(df: pd.DataFrame, similarity_cols: list, min_shared_attrs: 
 
 def build_edge_index_rare_shared(df: pd.DataFrame, cols: list, rarity_threshold: float = 0.10) -> torch.Tensor:
     """
-    Connecte deux dossiers s'ils partagent la MÊME valeur RARE (fréquence
-    < rarity_threshold) sur au moins une des colonnes fournies. Cible
-    spécifiquement les combinaisons atypiques plutôt que le profil général,
-    contrairement aux tentatives précédentes qui diluaient le signal en
-    connectant sur des valeurs fréquentes et peu informatives.
+    Tentative 4 : Connecte deux dossiers s'ils partagent la MÊME valeur RARE
+    (fréquence < rarity_threshold) sur au moins une des colonnes fournies.
     """
-    from collections import defaultdict
-
     edges = set()
 
     for col in cols:
@@ -121,3 +90,23 @@ def build_edge_index_rare_shared(df: pd.DataFrame, cols: list, rarity_threshold:
 
     edge_list = list(edges)
     return torch.tensor(edge_list, dtype=torch.long).t().contiguous()
+
+
+def build_pyg_graph(df: pd.DataFrame, feature_cols: list, strategy: str = "repnumber", **kwargs) -> Data:
+    """Construit l'objet Data PyTorch Geometric selon la stratégie choisie."""
+    df = df.reset_index(drop=True)
+
+    x = torch.tensor(df[feature_cols].values, dtype=torch.float32)
+    y = torch.tensor(df["fraud_label"].values, dtype=torch.long)
+
+    if strategy == "repnumber":
+        edge_index = build_edge_index_repnumber(df, **kwargs)
+    elif strategy == "similarity":
+        edge_index = build_edge_index_similarity(df, **kwargs)
+    elif strategy == "rare":
+        edge_index = build_edge_index_rare_shared(df, **kwargs)
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+    data = Data(x=x, edge_index=edge_index, y=y)
+    return data

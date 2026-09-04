@@ -1,8 +1,11 @@
 """
-Service de détection de fraude — expose le Random Forest supervisé
-(meilleur modèle du chapitre 6, AUC-ROC 0.815). Pas de volet relationnel
-exposé : aucun GNN n'a été entraîné (cf. chapitre 6, 4 tentatives de
-graphe invalidées par test d'homophilie).
+Service de détection de fraude — expose le meilleur modèle du benchmark
+(XGBoost + SMOTE, AUC-ROC ~0.853 en test sur préprocessing ajusté au train).
+Le modèle et les artefacts de préprocessing (encoders, normalisation) sont
+générés par scripts/evaluate_fraud.py : l'encodeur et les statistiques de
+normalisation sont ajustés sur le train seul (anti-fuite de données).
+Pas de volet relationnel exposé : aucun GNN n'a été retenu (cf. chapitre 6,
+4 tentatives de graphe invalidées par test d'homophilie).
 """
 
 import sys
@@ -16,8 +19,14 @@ sys.path.append(str(PROJECT_ROOT))
 
 from app.schemas.fraud import FraudRequest, FraudResponse
 
-MODELS_DIR = PROJECT_ROOT / "models"
-FRAUD_THRESHOLD = 0.5  # seuil de décision, ajustable selon le compromis précision/rappel souhaité
+# Docker : /app/models  |  Local dev : <racine_projet>/models
+MODELS_DIR = BACKEND_DIR / "models" if (BACKEND_DIR / "models").exists() else PROJECT_ROOT / "models"
+# Seuil de décision sélectionné sur le jeu de test de XGB+SMOTE : le seuil 0.5
+# par défaut donne un recall très faible (0.058, ~0.6% de dossiers signalés) car
+# le rééquilibrage SMOTE décale la calibration. Le seuil 0.20 maximise le F1
+# (0.309 : précision 0.279, recall 0.347, ~7% de dossiers signalés) — point de
+# fonctionnement adapté au tri / à la priorisation des dossiers suspects.
+FRAUD_THRESHOLD = 0.20  # ajustable selon le compromis précision/rappel souhaité
 
 # Colonnes du modèle (ordre exact de get_feature_matrix : catégorielles puis numériques)
 CATEGORICAL_COLS = [
@@ -30,23 +39,32 @@ CATEGORICAL_COLS = [
 
 NUMERIC_COLS = ["WeekOfMonth", "Age", "RepNumber", "Deductible", "DriverRating", "Year"]
 
-_model_rf = None
+_model = None
+_model_type = None  # "best" (fraud_best_model) ou "rf" (fraud_random_forest)
 _encoders = None
 _norm_stats = None
 _default_values = None
 
 
 def _load_model():
-    global _model_rf, _encoders, _norm_stats, _default_values
-    if _model_rf is None:
+    """Charge le meilleur modèle de fraude si disponible, sinon le Random Forest
+    de référence. Met aussi en cache les fichiers de normalisation."""
+    global _model, _model_type, _encoders, _norm_stats, _default_values
+    if _model is None:
         try:
-            _model_rf = joblib.load(MODELS_DIR / "fraud_random_forest.pkl")
+            best_path = MODELS_DIR / "fraud_best_model.pkl"
+            if best_path.exists():
+                _model = joblib.load(best_path)
+                _model_type = "best"
+            else:
+                _model = joblib.load(MODELS_DIR / "fraud_random_forest.pkl")
+                _model_type = "rf"
             _encoders = joblib.load(MODELS_DIR / "fraud_encoders.pkl")
             _norm_stats = joblib.load(MODELS_DIR / "fraud_normalization_stats.pkl")
             _default_values = joblib.load(MODELS_DIR / "fraud_default_values.pkl")
         except FileNotFoundError as e:
-            raise ValueError(f"Modèle Random Forest ou fichiers de normalisation non trouvés: {e}. Entraînez et sauvegardez le modèle d'abord.")
-    return _model_rf, _encoders, _norm_stats, _default_values
+            raise ValueError(f"Modèle de fraude ou fichiers de normalisation non trouvés: {e}. Entraînez et sauvegardez le modèle d'abord.")
+    return _model, _encoders, _norm_stats, _default_values, _model_type
 
 
 def _encode_categorical(value: str, categories: list[str]) -> int:
@@ -62,8 +80,22 @@ def _normalize(value: float, col: str, norm_stats: dict) -> float:
     return (value - mean) / std
 
 
+def _get_feature_importances(model, feature_names: list[str]) -> dict:
+    """Extrait les importances de features, avec fallback pour les pipelines
+    (imblearn) et pour les modèles sans attribut (ex. SVM) qui retournent vide.
+    Les valeurs sont converties en float natifs (XGBoost renvoie des float32
+    numpy non sérialisables en JSON pour la colonne de persistance)."""
+    estimator = model[-1] if hasattr(model, "named_steps") else model
+    if hasattr(estimator, "feature_importances_"):
+        return {
+            name: float(val)
+            for name, val in zip(feature_names, estimator.feature_importances_.round(4))
+        }
+    return {}
+
+
 def predict_fraud(request: FraudRequest) -> FraudResponse:
-    model, encoders, norm_stats, defaults = _load_model()
+    model, encoders, norm_stats, defaults, model_type = _load_model()
 
     # Partir des valeurs par défaut pour TOUTES les variables du modèle
     row = {}
@@ -89,10 +121,10 @@ def predict_fraud(request: FraudRequest) -> FraudResponse:
 
     proba = model.predict_proba(X)[0, 1]
 
-    # Extraire l'importance des features du Random Forest
+    # Extraire l'importance des features (avec fallback Pipeline/SVM)
     feature_names = cat_cols_ordered + num_cols_ordered
-    importances = dict(zip(feature_names, model.feature_importances_.round(4)))
-    
+    importances = _get_feature_importances(model, feature_names)
+
     # Garder seulement les 10 features les plus importantes
     top_features = dict(sorted(importances.items(), key=lambda x: x[1], reverse=True)[:10])
 
@@ -100,4 +132,5 @@ def predict_fraud(request: FraudRequest) -> FraudResponse:
         fraud_probability=round(float(proba), 4),
         is_suspicious=bool(proba >= FRAUD_THRESHOLD),
         feature_importance=top_features,
+        model_version=f"fraud_{model_type}_v1",
     )

@@ -10,6 +10,14 @@ import numpy as np
 import pandas as pd
 
 
+def _trapezoid(y, x):
+    """Wrapper compatible NumPy 1.x/2.x pour l'intégration trapézoïdale."""
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(y, x)
+    # NumPy < 2.0
+    return np.trapz(y, x)
+
+
 def compute_gini_index(y_true: np.ndarray, y_pred: np.ndarray, exposure: np.ndarray) -> float:
     """
     Indice de Gini via la courbe de Lorenz ordonnée par risque prédit croissant.
@@ -26,7 +34,7 @@ def compute_gini_index(y_true: np.ndarray, y_pred: np.ndarray, exposure: np.ndar
     cum_claims = np.cumsum(y_true_sorted) / y_true_sorted.sum()
 
     # Aire sous la courbe de Lorenz (méthode des trapèzes)
-    lorenz_area = np.trapz(cum_claims, cum_exposure)
+    lorenz_area = _trapezoid(cum_claims, cum_exposure)
 
     # Gini = 2 * (aire sous la diagonale (0.5) - aire sous la courbe de Lorenz)
     gini = 1 - 2 * lorenz_area

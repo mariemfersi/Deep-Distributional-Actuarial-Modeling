@@ -1,14 +1,192 @@
+# ─────────────────────────────────────────────────────────────────
+#  Architecture MLOps — MVP Développement
+#  Avant de lancer : cp .env.example .env et adapter les valeurs
+# ─────────────────────────────────────────────────────────────────
+
 services:
+  # ── PostgreSQL (Application) ──────────────────────────────────────
+  #  Base actuarial_platform pour le backend FastAPI.
+  #  La base mlflow_tracking est créée via db/init/01-create-mlflow-db.sql
   db:
     image: postgres:16
     environment:
       POSTGRES_DB: actuarial_platform
       POSTGRES_USER: actuarial
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     ports:
-      - "5432:5432"
+      - "5433:5432"  # 5433 côté hôte pour éviter le conflit avec le PostgreSQL local
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U actuarial -d actuarial_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
 
+  # ── Backend FastAPI ──────────────────────────────────────────────
+  #  Attend que la DB et MLflow soient prêts avant de démarrer.
+  #  Le healthcheck interroge /health (backend/app/main.py).
+  #  Port 8000 interne au réseau Docker — accès via nginx (port 8080).
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: postgresql://actuarial:${POSTGRES_PASSWORD:-changeme}@db:5432/actuarial_platform
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      ENVIRONMENT: development
+    depends_on:
+      db:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/scripts:/app/scripts
+      - ./src:/app/src
+      - ./models:/app/models:ro
+      - ./data:/app/data:ro
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-network
+
+  # ── Frontend Next.js ────────────────────────────────────────────
+  #  NEXT_PUBLIC_API_URL = "/api" (chemin relatif via nginx).
+  #  Le navigateur appelle localhost:8080/api/* → nginx → backend:8000.
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    expose:
+      - "3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - app-network
+
+  # ── MLflow Server ───────────────────────────────────────────────
+  #  Base de données séparée : mlflow_tracking (même instance PostgreSQL).
+  #  Artifacts stockés localement dans le volume mlflow-data.
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.15.2-full  # -full inclut psycopg2 et autres drivers DB
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_TRACKING_URI: postgresql://actuarial:${POSTGRES_PASSWORD:-changeme}@db:5432/mlflow_tracking
+      # Autorise le hostname interne "mlflow" (utilisé par le backend) + wildcard
+      # pour toute IP privée, en plus des localhost par défaut. Sans ce réglage,
+      # le backend reçoit "Invalid Host header - possible DNS rebinding attack".
+      MLFLOW_SERVER_ALLOWED_HOSTS: mlflow:5000,*,localhost,127.0.0.1
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://actuarial:${POSTGRES_PASSWORD:-changeme}@db:5432/mlflow_tracking
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    volumes:
+      - mlflow-data:/mlflow
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+  # ── Prometheus ──────────────────────────────────────────────────
+  #  Scrape le backend (metrics endpoint) et lui-même.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ── Grafana ─────────────────────────────────────────────────────
+  #  Dashboards pré-configurés via provisioning.
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+  # ── Nginx Reverse Proxy ────────────────────────────────────────
+  #  Point d'entrée unique : localhost:8080
+  #  /api/* → backend:8000  |  / → frontend:3000
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network
+
+# ── Réseau applicatif dédié ──────────────────────────────────────
+networks:
+  app-network:
+    driver: bridge
+
+# ── Volumes persistants ──────────────────────────────────────────
 volumes:
   pgdata:
+  mlflow-data:
+  prometheus-data:
+  grafana-data:

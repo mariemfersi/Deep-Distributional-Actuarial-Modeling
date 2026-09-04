@@ -20,4 +20,4 @@ class FraudResponse(BaseModel):
     fraud_probability: float
     is_suspicious: bool
     feature_importance: dict = Field(description="Importance globale des features (Random Forest)")
-    model_version: str = "random_forest_v1"
+    model_version: str = "fraud_best_v1"

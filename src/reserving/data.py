@@ -118,7 +118,7 @@ def build_sequences(full_df: pd.DataFrame, evaluation_year: int = EVALUATION_YEA
     return np.array(series_list), np.array(masks), keys, np.array(premiums)
 
 
-def build_sequences(full_df: pd.DataFrame, evaluation_year: int = EVALUATION_YEAR, min_premium: float = 100_000):
+def build_sequences(full_df: pd.DataFrame, evaluation_year: int = EVALUATION_YEAR, min_premium: float = 1000):
     """
     Construit, pour chaque (compagnie, année de survenance), la séquence des
     10 incréments de paiement normalisés par la prime acquise.

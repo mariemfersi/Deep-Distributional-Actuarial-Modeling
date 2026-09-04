@@ -1,0 +1,25 @@
+{
+  "target_idx": 14127,
+  "target_prob": 0.9900953769683838,
+  "y_true": 1,
+  "auc_roc": 0.7895715744772348,
+  "pr_auc": 0.15024284301716687,
+  "subgraph_nodes": 30,
+  "subgraph_edges": 435,
+  "important_edges": 109,
+  "p_full": 0.9900953769683838,
+  "p_kept": 0.4228252172470093,
+  "p_excluded": 0.0869930163025856,
+  "top_features": {
+    "Days_Policy_Accident": 0.6032137274742126,
+    "Make": 0.5883568525314331,
+    "Deductible": 0.5302345752716064,
+    "Days_Policy_Claim": 0.4825029969215393,
+    "NumberOfSuppliments": 0.47222191095352173,
+    "RepNumber": 0.4676397740840912,
+    "DriverRating": 0.4453810751438141,
+    "WeekOfMonth": 0.4453650414943695,
+    "Month": 0.41732972860336304,
+    "MonthClaimed": 0.37726205587387085
+  }
+}

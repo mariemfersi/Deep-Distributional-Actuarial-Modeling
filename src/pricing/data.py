@@ -112,3 +112,100 @@ def get_severity_subset(df: pd.DataFrame) -> pd.DataFrame:
       - sinistres attritionnels uniquement (is_large_claim == False)
     """
     return df[(df["ClaimAmount"] > 0) & (~df["is_large_claim"])].copy()
+
+
+def out_of_time_split(df: pd.DataFrame, train_years: list[int], test_years: list[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split temporel pour validation out-of-time (Solvency II requirement).
+    
+    Entraîne sur des années de souscription antérieures, teste sur des années
+    ultérieures pour évaluer la stabilité du modèle dans le temps.
+    
+    Args:
+        df: Dataset complet avec colonne 'PolicyYear' (année de souscription)
+        train_years: Liste des années d'entraînement (ex: [2003, 2004])
+        test_years: Liste des années de test (ex: [2005])
+    
+    Returns:
+        train_df, test_df: Datasets d'entraînement et test
+    """
+    df = df.copy()
+    
+    # Vérifier que PolicyYear existe
+    if "PolicyYear" not in df.columns:
+        # Si PolicyYear n'existe pas, créer une colonne basée sur une autre colonne temporelle
+        # ou utiliser un split aléatoire comme fallback
+        raise ValueError("Colonne 'PolicyYear' requise pour le split out-of-time")
+    
+    train_df = df[df["PolicyYear"].isin(train_years)].reset_index(drop=True)
+    test_df = df[df["PolicyYear"].isin(test_years)].reset_index(drop=True)
+    
+    return train_df, test_df
+
+
+def evaluate_out_of_time_performance(train_df: pd.DataFrame, test_df: pd.DataFrame, model, 
+                                     exposure_col: str = "Exposure", claim_col: str = "ClaimNb") -> dict:
+    """
+    Évalue la performance out-of-time avec métriques actuarielles standard.
+    
+    Args:
+        train_df: Données d'entraînement
+        test_df: Données de test (années ultérieures)
+        model: Modèle entraîné (GLM ou CANN)
+        exposure_col: Nom de la colonne d'exposition
+        claim_col: Nom de la colonne de nombre de sinistres
+    
+    Returns:
+        Dictionnaire de métriques de performance out-of-time
+    """
+    from src.pricing.evaluate import compute_gini_index
+    
+    # Prédictions sur le test set
+    X_test = test_df.drop(columns=[claim_col, exposure_col, "ClaimAmount", "is_large_claim", "ClaimAmount_capped"], errors="ignore")
+    exposure_test = test_df[exposure_col].values
+    claims_test = test_df[claim_col].values
+    
+    # Obtenir les prédictions du modèle
+    if hasattr(model, 'predict'):
+        pred_freq = model.predict(X_test)
+    else:
+        # Pour les modèles PyTorch/CANN
+        pred_freq = model(X_test)
+    
+    # Calculer le Gini out-of-time
+    gini_oot = compute_gini_index(claims_test, pred_freq * exposure_test, exposure_test)
+    
+    # Calculer la déviance out-of-time
+    deviance_oot = compute_poisson_deviance(claims_test, pred_freq, exposure_test)
+    
+    # Calculer le ratio de sinistralité observé vs prédit
+    observed_freq = claims_test.sum() / exposure_test.sum()
+    predicted_freq = (pred_freq * exposure_test).sum() / exposure_test.sum()
+    freq_ratio = observed_freq / predicted_freq if predicted_freq > 0 else 0
+    
+    return {
+        "gini_out_of_time": gini_oot,
+        "deviance_out_of_time": deviance_oot,
+        "observed_frequency": observed_freq,
+        "predicted_frequency": predicted_freq,
+        "frequency_ratio": freq_ratio,
+        "train_size": len(train_df),
+        "test_size": len(test_df),
+        "train_years": sorted(train_df["PolicyYear"].unique()) if "PolicyYear" in train_df.columns else [],
+        "test_years": sorted(test_df["PolicyYear"].unique()) if "PolicyYear" in test_df.columns else []
+    }
+
+
+def compute_poisson_deviance(y_true: np.ndarray, y_pred: np.ndarray, exposure: np.ndarray) -> float:
+    """
+    Calcule la déviance de Poisson pour évaluer la qualité d'ajustement.
+    
+    Deviance = 2 * sum(y * log(y/mu) - (y - mu)) avec mu = pred * exposure
+    """
+    mu = y_pred * exposure
+    # Éviter log(0) en ajoutant un petit epsilon
+    epsilon = 1e-10
+    deviance = 2 * np.sum(
+        y_true * np.log((y_true + epsilon) / (mu + epsilon)) - (y_true - mu)
+    )
+    return deviance / exposure.sum()  # Normaliser par l'exposition totale

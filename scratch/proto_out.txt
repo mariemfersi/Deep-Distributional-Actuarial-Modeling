@@ -1,0 +1,12 @@
+Graphe : 10544 arêtes (directed symétriques)
+Entraînement terminé — loss finale = 0.7485
+AUC-ROC test = 0.789 | PR-AUC = 0.148
+Vrais positifs de test : 159 | top-3 scores : [np.float32(0.989), np.float32(0.974), np.float32(0.933)]
+node_idx=14127 nom=408 prob=0.989 2-hop=30 nodes 870 edges
+
+=== GNNExplainer sur node_idx = 14127 ===
+node_mask shape: torch.Size([15420, 30])
+edge_mask shape: torch.Size([10544])
+edge_mask: min=0.000 max=0.828 mean=0.012 n_edges=10544
+node_mask: min=0.000 max=0.709
+Top-8 features : [('Days_Policy_Accident', 0.001), ('Make', 0.001), ('Deductible', 0.001), ('Days_Policy_Claim', 0.001), ('RepNumber', 0.001), ('NumberOfSuppliments', 0.001), ('WeekOfMonth', 0.001), ('DriverRating', 0.001)]

@@ -8,49 +8,48 @@ A production-ready actuarial platform combining classical GLM methods with moder
 
 | Module | Baseline | Our Model | Improvement |
 |--------|----------|-----------|-------------|
-| **Pricing** (Gini) | GLM Poisson | CANN Interaction | **+7%** (in notebook) |
-| **Reserving** (Coverage) | Mack Chain-Ladder | Mack + Conformal | **74.4% → 91.9%** |
-| **Fraud** (AUC-ROC) | Isolation Forest | Random Forest | **0.815** |
+| **Pricing** (Gini) | GLM Poisson | CANN Interaction | **+4.2%** Gini relatif |
+| **Reserving** (Coverage) | Mack Chain-Ladder | Mack + Conformal | **74.5% → 93.7%** |
+| **Fraud** (AUC-ROC) | Isolation Forest | XGBoost + SMOTE | **0.853** |
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Frontend (Next.js)                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                 │
-│  │ Pricing  │  │Reserving │  │  Fraud   │                 │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘                 │
-└───────┼─────────────┼─────────────┼────────────────────────┘
-        │             │             │
-        └─────────────┼─────────────┘
-                      │
-┌─────────────────────┼───────────────────────────────────────┐
-│                     Backend (FastAPI)                       │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │  Pricing Service                                      │  │
-│  │  • GLM Poisson (baseline)                            │  │
-│  │  • CANN Interaction Model (VehPower/VehAge/VehGas)   │  │
-│  │  • NGBoost Severity (distributional)                 │  │
-│  │  • Gaussian Copula (frequency-severity dependence)   │  │
-│  └─────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │  Reserving Service                                    │  │
-│  │  • Mack Chain-Ladder (stochastic baseline)            │  │
-│  │  • Conformal Prediction (guaranteed intervals)       │  │
-│  │  • Deep Triangle GRU (sequential modeling)           │  │
-│  └─────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │  Fraud Service                                       │  │
-│  │  • Random Forest (supervised, AUC-ROC 0.815)         │  │
-│  │  • Default values for 30 features                   │  │
-│  │  • Graph construction (for future GNN extension)      │  │
-│  └─────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │  Explainability Service                              │  │
-│  │  • SHAP values for pricing predictions               │  │
-│  │  • SHAP values for fraud predictions                 │  │
-│  └─────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+                          ┌──────────────────────┐
+                          │   Nginx (port 8080)   │
+                          │   Reverse Proxy       │
+                          └──────┬───────┬───────┘
+                                 │       │
+                    /api/*       │       │   /
+                                 ▼       ▼
+┌────────────────────────────────┐  ┌────────────────────────────────┐
+│     Backend (FastAPI :8000)    │  │    Frontend (Next.js :3000)    │
+│  ┌──────────────────────────┐ │  │  ┌──────────┐ ┌──────────┐   │
+│  │ Pricing Service          │ │  │  │ Pricing  │ │Reserving │   │
+│  │ • GLM Poisson (baseline) │ │  │  └────┬─────┘ └────┬─────┘   │
+│  │ • CANN Interaction       │ │  │       │             │          │
+│  │ • NGBoost Severity       │ │  │  ┌────┴─────┐ ┌────┴─────┐   │
+│  │ • Gaussian Copula        │ │  │  │  Fraud   │ │Explainab.│   │
+│  ├──────────────────────────┤ │  │  └──────────┘ └──────────┘   │
+│  │ Reserving Service        │ │  └────────────────────────────────┘
+│  │ • Mack Chain-Ladder      │ │
+│  │ • Conformal Prediction   │ │
+│  │ • Deep Triangle GRU      │ │
+│  ├──────────────────────────┤ │
+│  │ Fraud Service            │ │
+│  │ • XGBoost + SMOTE        │ │
+│  │ • Boruta Features        │ │
+│  ├──────────────────────────┤ │
+│  │ Explainability Service   │ │
+│  │ • SHAP (pricing + fraud) │ │
+│  └──────────────────────────┘ │
+└────────────────────────────────┘
+        │            │            │
+        ▼            ▼            ▼
+   ┌─────────┐ ┌─────────┐ ┌───────────┐
+   │PostgreSQL│ │ MLflow  │ │Prometheus │
+   │  :5432   │ │  :5000  │ │+ Grafana  │
+   └─────────┘ └─────────┘ └───────────┘
 ```
 
 ## 📊 Modules
@@ -66,19 +65,19 @@ A production-ready actuarial platform combining classical GLM methods with moder
 ### 2. Reserving (Provisionnement)
 - **Mack Chain-Ladder** stochastic baseline with standard errors
 - **Conformal Prediction** calibration for guaranteed coverage
-  - Empirical coverage: **74.4% (Mack) → 91.9% (Conformal)**
+  - Empirical coverage: **74.5% (Mack) → 93.7% (Conformal)**
   - No distributional assumptions required
 - **Deep Triangle GRU** for sequential modeling of payment patterns
 
 ### 3. Fraud Detection (Détection de fraude)
-- **Random Forest** supervised model (AUC-ROC 0.815)
+- **XGBoost + SMOTE** supervised model (AUC-ROC 0.853, benchmark of 7 variants)
 - **30 features** with categorical encoding and numerical normalization
 - **Default values** strategy for simplified frontend input
 - **Graph construction** functions for future GNN extension
 
 ### 4. Explainability (Explicabilité)
 - **SHAP values** for pricing predictions (GLM + CANN)
-- **SHAP values** for fraud predictions (Random Forest)
+- **SHAP values** for fraud predictions (XGBoost)
 - Feature importance visualization
 
 ## 🚀 Quick Start
@@ -106,17 +105,35 @@ cd ../frontend
 npm install
 ```
 
-### Running the Application
+### Running the Application (Docker — recommended)
+
+```bash
+# Copy environment file
+cp .env.example .env
+
+# Start all services
+docker compose up -d --build
+```
+
+The application will be available at:
+- **Everything via nginx**: http://localhost:8080
+- Frontend: http://localhost:8080/
+- API: http://localhost:8080/api/health
+- API Documentation: http://localhost:8080/api/docs
+- MLflow: http://localhost:5000
+- Grafana: http://localhost:3001
+
+### Running Locally (without Docker)
 
 ```bash
 # Start backend (from backend directory)
 python -m uvicorn app.main:app --reload --port 8000
 
 # Start frontend (from frontend directory, in a new terminal)
-npm run dev
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-The application will be available at:
+Local URLs:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
@@ -169,17 +186,27 @@ jupyter notebooks/05_fraud.ipynb
 
 ## 📈 API Endpoints
 
+All endpoints are accessed via nginx at `http://localhost:8080/api/...`.
+
 ### Pricing
-- `POST /pricing/predict` - Predict pure premium with CANN interaction model
-- `POST /explain/pricing` - Get SHAP values for pricing prediction
+- `POST /api/pricing/predict` - Predict pure premium with CANN interaction model
+- `POST /api/pricing/severity-distribution` - Get NGBoost severity distribution
+- `POST /api/pricing/premium-copula` - Get premium with copula dependence
+- `POST /api/explain/pricing` - Get SHAP values for pricing prediction
 
 ### Reserving
-- `POST /reserving/ibnr` - Predict IBNR with Mack + Conformal intervals
-- `POST /reserving/predict` - Predict future increments with Deep Triangle
+- `POST /api/reserving/ibnr` - Predict IBNR with Mack + Conformal intervals
+- `POST /api/reserving/predict` - Predict future increments with Deep Triangle
 
 ### Fraud
-- `POST /fraud/predict` - Predict fraud probability with Random Forest
-- `POST /explain/fraud` - Get SHAP values for fraud prediction
+- `POST /api/fraud/predict` - Predict fraud probability with XGBoost + SMOTE
+- `GET /api/fraud/methodology` - Get fraud benchmark methodology
+- `POST /api/explain/fraud` - Get SHAP values for fraud prediction
+
+### System
+- `GET /api/health` - Health check
+- `GET /api/models/status` - Model artifact status
+- `GET /api/docs` - Swagger UI documentation
 
 ## 🔬 Technical Stack
 

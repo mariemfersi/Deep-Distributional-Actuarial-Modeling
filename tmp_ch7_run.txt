@@ -1,0 +1,31 @@
+================================================================
+SECTION 7.3 — GNNExplainer appliqué au module fraude (valeurs réelles)
+================================================================
+
+[Data] N=15420 | |E|(dir.)=10544 | 30 variables
+Prévalence fraude : 0.0599 | train=12336, test=3084
+
+[Train] GraphSAGE 2 couches (hid=32) — 150 epochs, loss=0.7485
+[Eval] AUC-ROC=0.789 | PR-AUC=0.148 (n=3084)
+
+[Cible] node_idx=14127 | P(fraude) prédite=0.989 | statut réel=fraude
+[GNNExplainer] Optimisation des masques de nœud / arête ...
+  node_mask (15420, 30) | edge_mask (10544,) (max=0.791, mean=0.017)
+  Sous-graphe : 30 nœuds | 435 arêtes non-dir. | 109 arêtes clés (M >= 0.190)
+
+[Features] Top-10 (masque moyen sur sous-graphe) :
+  AgeOfPolicyHolder                0.5904
+  Deductible                       0.5847
+  WitnessPresent                   0.5396
+  AddressChange_Claim              0.5145
+  PoliceReportFiled                0.4728
+  VehiclePrice                     0.4590
+  Sex                              0.4563
+  AgentType                        0.4523
+  Days_Policy_Accident             0.4192
+  WeekOfMonth                      0.4103
+
+[Validation] P(full)=0.989 | P(arêtes clés seules)=0.350 | P(hors arêtes clés)=0.104
+
+[OK] Figure générée -> D:\Téléchargements\projet_actuariat\reports\figures\chapter7_gnn_explainer_fraud.png
+[OK] Résumé persisté -> reports/figures/chapter7_gnn_explainer_summary.json
